@@ -1,0 +1,14 @@
+feed_id,feed_url,category,enabled
+F-1,https://techcrunch.com/feed/,startups,true
+F-2,https://venturebeat.com/category/ai/feed/,ai,true
+F-3,https://news.crunchbase.com/feed/,startups,true
+F-4,https://news.ycombinator.com/rss,tech,true
+F-5,https://yourstory.com/feed,apac,true
+F-6,https://inc42.com/feed/,apac,true
+F-7,https://entrackr.com/rss,apac,true
+F-8,https://openai.com/blog/rss.xml,ai,true
+F-9,https://blog.google/technology/ai/rss/,ai,true
+F-10,https://deepmind.google/blog/rss.xml,ai,true
+F-11,https://www.microsoft.com/en-us/research/feed/,ai,true
+F-12,https://blogs.nvidia.com/feed/,ai,true
+F-13,https://rss.arxiv.org/rss/cs.AI,ai,true

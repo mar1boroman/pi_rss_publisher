@@ -1,0 +1,97 @@
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: rss_app_image:latest
+  env_file:
+    - .env
+  depends_on:
+    rss_postgres:
+      condition: service_healthy
+
+services:
+  rss_postgres:
+    image: postgres:16
+    container_name: rss_postgres
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: secretpass
+      POSTGRES_DB: appdb
+    ports:
+      - "5514:5432"
+    volumes:
+      - rss_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  rss_pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: rss_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: adminpass
+    ports:
+      - "8686:80"
+    depends_on:
+      rss_postgres:
+        condition: service_healthy
+    volumes:
+      - rss_pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
+
+  # one-shot DB init
+  rss_init:
+    <<: *app
+    command: >
+      bash -lc "
+        echo '🛠️  Running init_db.py...';
+        uv run python init_db.py &&
+        echo '✅ init_db complete'
+      "
+    restart: "no"
+
+  # FastAPI server
+  rss_api:
+    <<: *app
+    depends_on:
+      rss_postgres:
+        condition: service_healthy
+      rss_init:
+        condition: service_completed_successfully
+    command: >
+      bash -lc "
+        echo '🚀 Starting API...';
+        uv run uvicorn api:app --host 0.0.0.0 --port 8000
+      "
+    ports:
+      - "8211:8000"
+    restart: unless-stopped
+
+  # scheduler: run main.py every N minutes
+  rss_worker:
+    <<: *app
+    depends_on:
+      rss_postgres:
+        condition: service_healthy
+      rss_init:
+        condition: service_completed_successfully
+    command: >
+      bash -lc '
+        echo "⏱️ scheduler every ${FETCH_INTERVAL_MINUTES:-30} minute(s)";
+        while true; do
+          echo "▶️  job start: $(date -u +%F_%T)Z";
+          uv run python main.py;
+          echo "⏸️  sleeping ${FETCH_INTERVAL_MINUTES:-30}m";
+          sleep $(( (${FETCH_INTERVAL_MINUTES:-30}) * 60 ));
+        done
+      '
+    restart: unless-stopped
+
+volumes:
+  rss_pgdata:
+  rss_pgadmin_data:
