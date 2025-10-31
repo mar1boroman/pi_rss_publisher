@@ -103,17 +103,28 @@ services:
       - ./nginx/html:/var/www/certbot
       - ./nginx/letsencrypt:/etc/letsencrypt
     command: >
-      sh -c '
+      sh -lc '
         apk add --no-cache gettext >/dev/null;
-        CERT_PATH="/etc/letsencrypt/live/${DOMAIN_NAME}";
-        if [ -f "$CERT_PATH/fullchain.pem" ] && [ -f "$CERT_PATH/privkey.pem" ]; then
-          echo "🔐 Certs found. Using HTTPS config.";
+        to_https() {
+          echo "🔐 Certs found. Switching to HTTPS config and reloading...";
           envsubst "$$DOMAIN_NAME" < /etc/nginx/templates/rss.conf.template > /etc/nginx/conf.d/rss.conf;
-        else
+          nginx -s reload || true;
+        }
+        to_http() {
           echo "🟡 No certs yet. Using HTTP-only config.";
           envsubst "$$DOMAIN_NAME" < /etc/nginx/templates/rss.http-only.template > /etc/nginx/conf.d/rss.conf;
-        fi
-        nginx -g "daemon off;";
+        }
+        CERT="/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem";
+        KEY="/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem";
+        if [ -f "$CERT" ] && [ -f "$KEY" ]; then to_https; else to_http; fi
+        nginx -g "daemon off;" &
+        while :; do
+          sleep 30;
+          if [ -f "$CERT" ] && [ -f "$KEY" ] && ! grep -q "listen 443" /etc/nginx/conf.d/rss.conf; then
+            to_https
+          fi
+        done
+        wait
       '
     restart: unless-stopped
 
