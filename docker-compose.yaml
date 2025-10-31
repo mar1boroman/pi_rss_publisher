@@ -63,7 +63,7 @@ services:
         condition: service_completed_successfully
     command: >
       bash -lc "
-        echo '🚀 Starting API...';
+        echo '🚀 Starting API (http behind nginx)...';
         uv run uvicorn api:app --host 0.0.0.0 --port 8000 --proxy-headers
       "
     restart: unless-stopped
@@ -96,64 +96,19 @@ services:
         condition: service_started
     ports:
       - "80:80"
-      - "443:443"
     volumes:
-      - ./nginx/conf.d/rss.conf.template:/etc/nginx/templates/rss.conf.template:ro
-      - ./nginx/conf.d/rss.http-only.template:/etc/nginx/templates/rss.http-only.template:ro
-      - ./nginx/html:/var/www/certbot
-      - ./nginx/letsencrypt:/etc/letsencrypt
+      - ./nginx/conf.d/rss.http.conf:/etc/nginx/conf.d/rss.conf:ro
     command: >
       sh -lc '
-        apk add --no-cache gettext >/dev/null;
-        to_https() {
-          echo "🔐 Certs found. Switching to HTTPS config and reloading...";
-          envsubst "$$DOMAIN_NAME" < /etc/nginx/templates/rss.conf.template > /etc/nginx/conf.d/rss.conf;
-          nginx -s reload || true;
-        }
-        to_http() {
-          echo "🟡 No certs yet. Using HTTP-only config.";
-          envsubst "$$DOMAIN_NAME" < /etc/nginx/templates/rss.http-only.template > /etc/nginx/conf.d/rss.conf;
-        }
-        CERT="/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem";
-        KEY="/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem";
-        if [ -f "$CERT" ] && [ -f "$KEY" ]; then to_https; else to_http; fi
-        nginx -g "daemon off;" &
-        while :; do
-          sleep 30;
-          if [ -f "$CERT" ] && [ -f "$KEY" ] && ! grep -q "listen 443" /etc/nginx/conf.d/rss.conf; then
-            to_https
-          fi
-        done
-        wait
+        # If you used ${DOMAIN_NAME} in the conf, render it; otherwise this is a no-op.
+        if grep -q "\${DOMAIN_NAME}" /etc/nginx/conf.d/rss.conf; then
+          apk add --no-cache gettext >/dev/null;
+          envsubst "$$DOMAIN_NAME" < /etc/nginx/conf.d/rss.conf > /etc/nginx/conf.d/_rss.conf;
+          mv /etc/nginx/conf.d/_rss.conf /etc/nginx/conf.d/rss.conf;
+        fi
+        nginx -g "daemon off;";
       '
     restart: unless-stopped
-
-  certbot:
-    image: certbot/certbot:latest
-    env_file:
-      - .env
-    volumes:
-      - ./nginx/html:/var/www/certbot
-      - ./nginx/letsencrypt:/etc/letsencrypt
-    command: >
-      sh -c '
-        echo "🔎 Checking certs for ${DOMAIN_NAME}";
-        if [ ! -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" ]; then
-          echo "⚙️  Issuing new certificate...";
-          certbot certonly --webroot -w /var/www/certbot \
-            -d "${DOMAIN_NAME}" \
-            --email "${CERTBOT_EMAIL}" --agree-tos --no-eff-email;
-        else
-          echo "🔁 Renewing certificate if needed...";
-          certbot renew --quiet;
-        fi
-        echo "✅ Certbot finished.";
-      '
-    depends_on:
-      nginx:
-        condition: service_started
-    restart: "no"
-
 volumes:
   rss_pgdata:
   rss_pgadmin_data:
