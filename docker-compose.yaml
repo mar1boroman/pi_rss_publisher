@@ -92,6 +92,46 @@ services:
       '
     restart: unless-stopped
 
+  # --- Nginx TLS reverse proxy (public) ---
+  nginx:
+    image: nginx:alpine
+    env_file:
+      - .env
+    depends_on:
+      rss_api:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d/rss.conf.template:/etc/nginx/templates/rss.conf.template:ro
+      - ./nginx/conf.d/rss.http-only.template:/etc/nginx/templates/rss.http-only.template:ro
+      - ./nginx/html:/var/www/certbot
+      - ./nginx/letsencrypt:/etc/letsencrypt
+    command: >
+      sh -c '
+        apk add --no-cache gettext >/dev/null;
+        if [ -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" ] &&
+          [ -f "/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem" ]; then
+          echo "🔐 TLS certs found. Using HTTPS config.";
+          envsubst "$$DOMAIN_NAME" < /etc/nginx/templates/rss.conf.template > /etc/nginx/conf.d/rss.conf;
+        else
+          echo "🟡 No certs yet. Using HTTP-only bootstrap config.";
+          envsubst "$$DOMAIN_NAME" < /etc/nginx/templates/rss.http-only.template > /etc/nginx/conf.d/rss.conf;
+        fi
+        nginx -g "daemon off;";
+      '
+    restart: unless-stopped
+
+  # --- Certbot (run manually for issue/renew) ---
+  certbot:
+    image: certbot/certbot:latest
+    env_file:
+      - .env
+    volumes:
+      - ./nginx/html:/var/www/certbot
+      - ./nginx/letsencrypt:/etc/letsencrypt
+
 volumes:
   rss_pgdata:
   rss_pgadmin_data:
