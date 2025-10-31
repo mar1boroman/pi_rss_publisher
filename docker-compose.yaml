@@ -89,25 +89,14 @@ services:
 
   nginx:
     image: nginx:alpine
-    env_file:
-      - .env
     depends_on:
       rss_api:
         condition: service_started
     ports:
       - "80:80"
     volumes:
-      - ./nginx/conf.d/rss.http.conf:/etc/nginx/conf.d/rss.conf:ro
-    command: >
-      sh -lc '
-        # If you used ${DOMAIN_NAME} in the conf, render it; otherwise this is a no-op.
-        if grep -q "\${DOMAIN_NAME}" /etc/nginx/conf.d/rss.conf; then
-          apk add --no-cache gettext >/dev/null;
-          envsubst "$$DOMAIN_NAME" < /etc/nginx/conf.d/rss.conf > /etc/nginx/conf.d/_rss.conf;
-          mv /etc/nginx/conf.d/_rss.conf /etc/nginx/conf.d/rss.conf;
-        fi
-        nginx -g "daemon off;";
-      '
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro # <-- mount the whole dir
+    command: ["nginx", "-g", "daemon off;"] # no templating needed now
     restart: unless-stopped
 volumes:
   rss_pgdata:
