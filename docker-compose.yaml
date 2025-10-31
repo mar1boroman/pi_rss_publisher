@@ -44,7 +44,6 @@ services:
       - rss_pgadmin_data:/var/lib/pgadmin
     restart: unless-stopped
 
-  # one-shot DB init
   rss_init:
     <<: *app
     command: >
@@ -55,7 +54,6 @@ services:
       "
     restart: "no"
 
-  # FastAPI server
   rss_api:
     <<: *app
     depends_on:
@@ -66,13 +64,10 @@ services:
     command: >
       bash -lc "
         echo '🚀 Starting API...';
-        uv run uvicorn api:app --host 0.0.0.0 --port 8000
+        uv run uvicorn api:app --host 0.0.0.0 --port 8000 --proxy-headers
       "
-    ports:
-      - "8211:8000"
     restart: unless-stopped
 
-  # scheduler: run main.py every N minutes
   rss_worker:
     <<: *app
     depends_on:
@@ -92,7 +87,6 @@ services:
       '
     restart: unless-stopped
 
-  # --- Nginx TLS reverse proxy (public) ---
   nginx:
     image: nginx:alpine
     env_file:
@@ -111,19 +105,18 @@ services:
     command: >
       sh -c '
         apk add --no-cache gettext >/dev/null;
-        if [ -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" ] &&
-          [ -f "/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem" ]; then
-          echo "🔐 TLS certs found. Using HTTPS config.";
+        CERT_PATH="/etc/letsencrypt/live/${DOMAIN_NAME}";
+        if [ -f "$CERT_PATH/fullchain.pem" ] && [ -f "$CERT_PATH/privkey.pem" ]; then
+          echo "🔐 Certs found. Using HTTPS config.";
           envsubst "$$DOMAIN_NAME" < /etc/nginx/templates/rss.conf.template > /etc/nginx/conf.d/rss.conf;
         else
-          echo "🟡 No certs yet. Using HTTP-only bootstrap config.";
+          echo "🟡 No certs yet. Using HTTP-only config.";
           envsubst "$$DOMAIN_NAME" < /etc/nginx/templates/rss.http-only.template > /etc/nginx/conf.d/rss.conf;
         fi
         nginx -g "daemon off;";
       '
     restart: unless-stopped
 
-  # --- Certbot (run manually for issue/renew) ---
   certbot:
     image: certbot/certbot:latest
     env_file:
@@ -131,6 +124,24 @@ services:
     volumes:
       - ./nginx/html:/var/www/certbot
       - ./nginx/letsencrypt:/etc/letsencrypt
+    command: >
+      sh -c '
+        echo "🔎 Checking certs for ${DOMAIN_NAME}";
+        if [ ! -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" ]; then
+          echo "⚙️  Issuing new certificate...";
+          certbot certonly --webroot -w /var/www/certbot \
+            -d "${DOMAIN_NAME}" \
+            --email "${CERTBOT_EMAIL}" --agree-tos --no-eff-email;
+        else
+          echo "🔁 Renewing certificate if needed...";
+          certbot renew --quiet;
+        fi
+        echo "✅ Certbot finished.";
+      '
+    depends_on:
+      nginx:
+        condition: service_started
+    restart: "no"
 
 volumes:
   rss_pgdata:
